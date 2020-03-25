@@ -29,15 +29,31 @@ def get_rho_sigma(sigma=2.55/255, iter_num=15):
 # --------------------------------
 # HWC, get uperleft and denominator
 # --------------------------------
-def get_uperleft_denominator(img, kernel):
+def get_uperleft_denominator(img, _kernel):
     '''
     Kai Zhang (github: https://github.com/cszn)
     03/03/2019
     '''
-    V = psf2otf(kernel, img.shape[:2])   # discrete fourier transform of kernel
-    denominator = np.expand_dims(np.abs(V)**2, axis=2)  # Fourier transform of K transpose * K
-    upperleft = np.expand_dims(np.conj(V), axis=2) * np.fft.fft2(img, axes=[0, 1])
-    return upperleft, denominator
+    if len(_kernel.shape) == 2:
+        kernel = _kernel
+        V = psf2otf(kernel, img.shape[:2])   # discrete fourier transform of kernel
+        _denominator = np.expand_dims(np.abs(V)**2, axis=2)  # Fourier transform of K transpose * K
+        _upperleft = np.expand_dims(np.conj(V), axis=2) * np.fft.fft2(img, axes=[0, 1])
+        return _upperleft, _denominator
+    else:
+        kernel = _kernel
+        [k_h, k_w, k_c] = kernel.shape
+        denominator = []
+        upperleft = []
+        for channel in range(k_c):
+            V = psf2otf(kernel[:,:,channel], img.shape[:2])   # discrete fourier transform of kernel
+            print(V.shape)
+            denominator.append(np.abs(V)**2)  # Fourier transform of K transpose * K
+            upperleft.append(np.conj(V) * np.fft.fft2(img[:,:,channel], axes=[0, 1]))
+        
+        denominator = np.stack((denominator[0], denominator[1], denominator[2]), axis=2)
+        upperleft = np.stack((upperleft[0], upperleft[1], upperleft[2]), axis=2)
+        return upperleft, denominator
 
 
 # otf2psf: not sure where I got this one from. Maybe translated from Octave source code or whatever. It's just math.
@@ -178,7 +194,7 @@ def opt_fft_size(n):
     # persistent opt_fft_size_LUT;
     '''
 
-    LUT_size = 2048
+    LUT_size = 3000
     # print("generate opt_fft_size_LUT")
     opt_fft_size_LUT = np.zeros(LUT_size)
 
@@ -225,6 +241,7 @@ def wrap_boundary_liu(img, img_size):
     Renting Liu, Jiaya Jia
     ICIP 2008
     """
+
     if img.ndim == 2:
         ret = wrap_boundary(img, img_size)
     elif img.ndim == 3:
@@ -234,7 +251,6 @@ def wrap_boundary_liu(img, img_size):
 
 
 def wrap_boundary(img, img_size):
-
     """
     python code from:
     https://github.com/ys-koshelev/nla_deblur/blob/90fe0ab98c26c791dcbdf231fe6f938fca80e2a0/boundaries.py

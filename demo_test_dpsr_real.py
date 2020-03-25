@@ -56,16 +56,16 @@ def main():
 
     # basic setting
     # ================================================
-    sf = 4
-    show_img = True
+    sf = 2
+    show_img = False
     noise_level_img = 8./255.
     testsets = 'testsets'
     testset_current = 'real_imgs'
 
-    im = 'chip.png'  # chip.png colour.png
+    im = 'pumpkin.png'  # chip.png colour.png
 
     if 'chip' in im:
-        noise_level_img = 8./255.
+        noise_level_img = 4./255.
     elif 'colour' in im:
         noise_level_img = 0.5/255.
 
@@ -95,7 +95,7 @@ def main():
     model.eval()
     for k, v in model.named_parameters():
         v.requires_grad = False
-    model = model.to(device)
+    model = model.to(device).half()
     logger.info('Model path {:s}. Testing...'.format(model_path))
 
     # --------------------------------
@@ -105,7 +105,8 @@ def main():
     L_folder = os.path.join(testsets, testset_current, 'LR')  # L: Low quality
 
     # --2--> E_folder, folder of Estimated images
-    E_folder = os.path.join(testsets, testset_current, 'x{:01d}_'.format(sf)+save_suffix)
+    outfolder = 'mar20'
+    E_folder = os.path.join('output', outfolder, 'x{:01d}_'.format(sf)+save_suffix)
     util.mkdir(E_folder)
 
     logger.info(L_folder)
@@ -134,7 +135,23 @@ def main():
         k = np.float64(k)  # float64 !
         k /= k.sum()
     else:
-        k = utils_deblur.fspecial('gaussian', 5, 0.25)
+        # filter_sigma = 0.30
+        # filter_size = 11
+        # k = utils_deblur.fspecial('gaussian', filter_size, filter_sigma)
+        filter_sigma=12121
+        k = cv2.imread(os.path.join(L_folder, 'psf_20_mar.png'), cv2.IMREAD_UNCHANGED)
+        
+        # smooth out the psf
+        k = k[:,:,[2,1,0]]
+        k = cv2.GaussianBlur(k, (5,5), 0)
+        k = cv2.resize (k, (5,5), interpolation=cv2.INTER_CUBIC)
+        k = np.float64(k)  # float64 !
+        k[:,:,0] /= k[:,:,0].sum()
+        k[:,:,1] /= k[:,:,1].sum()
+        k[:,:,2] /= k[:,:,2].sum()
+        
+        # k = np.stack((k,k,k), axis=2)
+        print(k.shape)
         iter_num = 5
 
     # --------------------------------
@@ -146,7 +163,7 @@ def main():
     # (6) get upperleft, denominator
     # --------------------------------
     upperleft, denominator = utils_deblur.get_uperleft_denominator(img, k)
-
+    print(upperleft.shape, denominator.shape)
     # --------------------------------
     # (7) get rhos and sigmas
     # --------------------------------
@@ -170,7 +187,7 @@ def main():
             z = util.imresize_np(z, 1/sf, True)
 
         z = np.real(np.fft.ifft2((upperleft + rho*np.fft.fft2(z, axes=(0, 1)))/(denominator + rho), axes=(0, 1)))
-
+        print(z.shape)
         # --------------------------------
         # step 2, Eq. (12) // super-resolver
         # --------------------------------
@@ -179,7 +196,7 @@ def main():
 
         noise_level_map = torch.ones((1, 1, img_L.size(2), img_L.size(3)), dtype=torch.float).mul_(sigma)
         img_L = torch.cat((img_L, noise_level_map), dim=1)
-        img_L = img_L.to(device)
+        img_L = img_L.to(device).half()
         # with torch.no_grad():
         z = model(img_L)
         z = util.tensor2single(z)
@@ -190,7 +207,7 @@ def main():
     img_E = util.single2uint(z[:h*sf, :w*sf])  # np.uint8((z[:h*sf, :w*sf] * 255.0).round())
 
     logger.info('saving: sf = {}, {}.'.format(sf, img_name+'_x{}'.format(sf)+ext))
-    util.imsave(img_E, os.path.join(E_folder, img_name+'_x{}'.format(sf)+ext))
+    util.imsave(img_E, os.path.join(E_folder, img_name+'_x{}_sig{}'.format(sf, filter_sigma)+ext))
 
     util.imshow(img_E, title='Recovered image') if show_img else None
 
